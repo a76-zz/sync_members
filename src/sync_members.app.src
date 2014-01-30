@@ -1,0 +1,12 @@
+{application, sync_members,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { sync_members_app, []}},
+  {env, []}
+ ]}.
