@@ -1,19 +1,19 @@
--module(sync_members_handler).
+-module(sync_members_transform).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, 
-    send/1]).
+-export([start_link/0, transform/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
      terminate/2, code_change/3]).
 
--define(SERVER, ?MODULE).
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
--record(state, {connection, channel}).
-
+-record(state, {map, key}).
 
 %% API implementation
 
@@ -21,12 +21,12 @@
 %% @doc Starts the server
 
 start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_server:start_link(?MODULE, [], []).
 
 
-%% @spec send() -> ok
-send(Message) ->
-    gen_server:call(?SERVER, {send, Message}).
+transform(Pid, ColNames, Row) ->
+    gen_server:call(Pid, {transform, {ColNames, Row}}).
+
 
 %% gen_server callbacks
 
@@ -36,12 +36,14 @@ send(Message) ->
 %%  ignore |
 %%  {stop, Reason}
 %% @doc Initiates the server
-
 init([]) ->
-    {ok, Connection, Channel} = amqp:connect("localhost"),
-    ok = amqp:basic_subscribe(Channel, <<"members_sync">>, self()),
-    {ok, #state{connection = Connection, channel=Channel}}.
-
+    Map = dict:from_list([
+    	{"member_id", <<"id_i">>},
+        {"first_name", <<"first_name_s">>},
+        {"last_name", <<"last_name_s">>}
+    ]),
+    Key = "http://localhost:8098/buckets/members/keys/",
+	{ok, #state{map=Map, key=Key}}.
 
 %% @spec handle_call(Request, From, State) -> 
 %%  {reply, Reply, State} |
@@ -51,8 +53,12 @@ init([]) ->
 %%  {stop, Reason, Reply, State} |
 %%  {stop, Reason, State}
 %% @doc Handling call messages
-handle_call(_Request, _From, State) ->
-    {noreply, State}.
+handle_call(Request, _From, State) ->
+    Reply = case Request of 
+    	{transform, {ColNames, Rows}} ->
+    		do_transform(ColNames, Rows, State)
+    end,
+    {reply, Reply, State}.
 
 %% @spec handle_cast(Msg, State) -> 
 %%  {noreply, State} |
@@ -63,25 +69,21 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-
 %% @spec handle_info(Info, State) -> 
 %%  {noreply, State} |
 %%  {noreply, State, Timeout} |
 %%  {stop, Reason, State}
 %% @doc Handling all non call/cast messages
 
-handle_info(Info, State) ->
-    amqp:basic_handle(State#state.channel, Info, State, fun do_handle/2),
+handle_info(_Info, State) ->
     {noreply, State}.
-
 
 %% @spec terminate(Reason, State) -> void()
 %% @doc This function is called by a gen_server when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any necessary
 %% cleaning up. When it returns, the gen_selrver terminates with Reason.
 %% The return value is ignored.
-terminate(_Reason, State) ->
-    amqp:disconect(State#state.connection, State#state.channel),
+terminate(_Reason, _State) ->
     ok.
 
 %% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
@@ -90,37 +92,21 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% Private functions
-do_handle(_Content, _State) ->
-    ok.
 
-save_content(Content, Map, KeyMap) ->
-    case Content of 
-        {selected, ColNames, Rows} ->
-            save_content(ColNames, Rows, Map, KeyMap)
-    end.
-
-save(Key, Value) -> 
-    io:format("Saved:~p:~p~n", [Key, Value]).
-
-get_key(Source, _KeyMap) ->
-    {"member_id", Id} = lists:keyfind("member_id", 1, Source), 
-    string:concat("http://localhost:8098/buckets/members/keys/", erlang:term_to_list(Id)).
-
-save_content(ColNames, [Row|OtherRows], Map, KeyMap) ->
+do_transform(ColNames, Row, State) ->
     Source = lists:zip(ColNames, erlang:tuple_to_list(Row)),
-    Value = transform(Source, Map),
-    Key = get_key(Source, KeyMap),
-    save(Key, Value),
-    save_content(ColNames, OtherRows, Map, KeyMap);
-
-save_content(_ColNames, [], _Map, _KeyMap) ->
-    ok.
-
-transform(Source, Map) ->
-    transform(Source, Map, []).
+    Key = get_key(Source, State#state.key),
+    Value = get_value(Source, State#state.map),
+    {ok, Key, Value}.
 
 
-transform([{Key, Value}|Source], Map, Result) ->
+get_value(Source, Map) ->
+    get_value(Source, Map, []).
+
+get_value([], _Map, Result) ->
+    lists:reverse(Result);
+
+get_value([{Key, Value}|Source], Map, Result) ->
     case dict:find(Key, Map) of 
         {ok, TKey} ->
             TValue = 
@@ -128,12 +114,35 @@ transform([{Key, Value}|Source], Map, Result) ->
                 is_list(Value) -> erlang:list_to_binary(Value);
                 true -> Value
             end,
-            transform(Source, Map, [{TKey, TValue}|Result]);    
+            get_value(Source, Map, [{TKey, TValue}|Result]);    
         error ->
-            transform(Source, Map, Result)
-    end;
+            get_value(Source, Map, Result)
+    end.
 
-transform([], _Map, Result) ->
-    Result.
+get_key(Source, Key) ->
+    {"member_id", Id} = lists:keyfind("member_id", 1, Source), 
+    string:concat(Key, erlang:integer_to_list(Id)).
+
+
+-ifdef(TEST).
+
+transform_test() ->
+    {ok, Pid} = sync_members_transform:start_link(),
+    {ok, Key, Value} = sync_members_transform:transform(Pid, ["member_id","first_name","last_name","time_stamp"],
+            {1,"andrei","silchankau",{{2014,1,29},{14,28,14}}}),
+        ?assertEqual(Key, "http://localhost:8098/buckets/members/keys/1"),
+        ?assertEqual(Value, [{<<"id_i">>, 1}, {<<"first_name_s">>, <<"andrei">>}, {<<"last_name_s">>, <<"silchankau">>}]).
+-endif.
+
+
+
+
+
+
+
+
+
+
+
 
 

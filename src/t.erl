@@ -4,10 +4,35 @@
 init() ->
 	ibrowse:start().
 
-create() ->
-    Body = jsx:encode([{<<"first_name_s">>,<<"jain">>},{<<"last_name_s">>,<<"air">>}]),
-	ibrowse:send_req("http://localhost:8098/buckets/members/keys/e101", [{"Content-Type", <<"application/json">>}], put, Body).
+create(Key, Value) ->
+    DeleteResp = ibrowse:send_req(Key, [], delete, []),
+    UpdateStatus = case DeleteResp of 
+		{ok, "404", _, _} -> {ok, new};
+		{ok, "204", _, _} -> {ok, update};
+		_ -> {delete_error, DeleteResp}
+	end,
+	case UpdateStatus of 
+		{ok, Status} ->
+			CreateResp = ibrowse:send_req(Key, [{"Content-Type", "application/json"}], put, Value),
+			case CreateResp of 
+				{ok, "204", _, _} -> {ok, Status};
+				_ -> {create_error, CreateResp}
+			end;
+		DeleteError ->
+			DeleteError
+	end.
 
+t_create() ->
+    Key = "http://localhost:8098/buckets/members/keys/1",
+    Value = jsx:encode([{<<"first_name_s">>,<<"jain">>},{<<"last_name_s">>,<<"air">>}]),
+    create(Key, Value).
+
+
+get() ->
+    ibrowse:send_req("http://localhost:8098/buckets/members/keys/1", [], get, []).
+
+
+%% curl -v -XPUT http://localhost:8098/buckets/members/keys/e911?returnbody=true -H "Content-Type: application/json" -d '{"first_name_s":"Ryan", "last_name_s":"Zezeski"}'
 	% curl 'http://localhost:8098/solr/members/select?q=first_name_s:jain&wt=json'
 
 % Sample data:
