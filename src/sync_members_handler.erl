@@ -32,7 +32,8 @@ do_handle(Content, _State) ->
     io:format("handle~p~n", [Content]),
     case Content of 
         {selected, ColNames, Rows} ->
-            handle_rows(ColNames, Rows, []);
+            Values = handle_rows(ColNames, Rows, []),
+            sync_members_sender:send(Values);
         _ ->
             io:format("error~p~n", [Content])
     end,
