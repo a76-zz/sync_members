@@ -25,6 +25,7 @@ start_link() ->
 init([]) ->
     Children = [?CHILD(sync_members_db, worker),
                 ?CHILD(sync_members_transform, worker),
+                ?CHILD(sync_members_sender, worker),
     			?CHILD(sync_members_handler, worker)],
 	RestartStrategy = {one_for_one, 0, 1},
 	{ok, {RestartStrategy, Children}}.

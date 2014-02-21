@@ -32,19 +32,19 @@ do_handle(Content, _State) ->
     io:format("handle~p~n", [Content]),
     case Content of 
         {selected, ColNames, Rows} ->
-            handle_rows(ColNames, Rows);
+            handle_rows(ColNames, Rows, []);
         _ ->
             io:format("error~p~n", [Content])
     end,
     ok.
 
-handle_rows(ColNames, []) ->
-    ok;
+handle_rows(_ColNames, [], Result) ->
+    Result;
 
-handle_rows(ColNames, [Row|OtherRows]) ->
+handle_rows(ColNames, [Row|OtherRows], Result) ->
     {ok, Key, Value} = sync_members_transform:transform(ColNames, Row),
     {ok, _UpdateType} = sync_members_db:save(Key, Value),
-    handle_rows(ColNames, OtherRows).
+    handle_rows(ColNames, OtherRows, [Value|Result]).
 
 
 handle_call(_Request, _From, State) ->
