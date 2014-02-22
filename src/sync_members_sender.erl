@@ -9,7 +9,7 @@
 	 terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(QUEUE, <<"members_update">>).
+-define(QUEUE, <<"members_sync_update">>).
 
 -record(state, {connection, channel}).
 
